@@ -1,0 +1,328 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "triggers": {
+      "Daily_Check": {
+        "type": "Recurrence",
+        "recurrence": {
+          "frequency": "Day",
+          "interval": 1,
+          "schedule": {
+            "hours": [
+              "8"
+            ],
+            "minutes": [
+              "0"
+            ]
+          },
+          "timeZone": "UTC"
+        }
+      }
+    },
+    "actions": {
+      "For_Each_Application": {
+        "type": "Foreach",
+        "foreach": "@body('Parse_JSON_Response')?['value']",
+        "actions": {
+          "Check_If_Rotation_Needed": {
+            "type": "If",
+            "expression": {
+              "and": [
+                {
+                  "equals": [
+                    "@length(body('Filter_Valid_Secrets'))",
+                    0
+                  ]
+                },
+                {
+                  "greater": [
+                    "@length(body('Filter_Expiring_Secrets'))",
+                    0
+                  ]
+                }
+              ]
+            },
+            "actions": {
+              "Append_Rotated_Secret": {
+                "type": "AppendToArrayVariable",
+                "inputs": {
+                  "name": "ExpiringSecrets",
+                  "value": {
+                    "AppId": "@{items('For_Each_Application')?['appId']}",
+                    "AppName": "@{items('For_Each_Application')?['displayName']}",
+                    "KeyVaultSecret": "@{toLower(replace(items('For_Each_Application')?['displayName'], ' ', '-'))}-clientsecret",
+                    "NewExpiryDate": "@{body('Create_New_Secret')?['endDateTime']}",
+                    "NewSecretName": "Password created by Logic App @{utcNow('yyyy-MM-dd')}",
+                    "OldExpiryDate": "@{first(body('Filter_Expiring_Secrets'))?['endDateTime']}",
+                    "OldSecretName": "@{coalesce(first(body('Filter_Expiring_Secrets'))?['displayName'], 'Unnamed')}",
+                    "Status": "Rotated"
+                  }
+                },
+                "runAfter": {
+                  "Store_In_KeyVault": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Create_New_Secret": {
+                "type": "Http",
+                "inputs": {
+                  "uri": "https://graph.microsoft.com/v1.0/applications/@{item()?['id']}/addPassword",
+                  "method": "POST",
+                  "headers": {
+                    "Content-Type": "application/json"
+                  },
+                  "body": {
+                    "passwordCredential": {
+                      "displayName": "Password created by Logic App @{utcNow('yyyy-MM-dd')}",
+                      "endDateTime": "@{addDays(utcNow(), 180)}"
+                    }
+                  },
+                  "authentication": {
+                    "audience": "https://graph.microsoft.com",
+                    "type": "ManagedServiceIdentity"
+                  }
+                },
+                "runtimeConfiguration": {
+                  "secureData": {
+                    "properties": [
+                      "outputs"
+                    ]
+                  }
+                }
+              },
+              "Send_Email_Notification": {
+                "type": "Http",
+                "inputs": {
+                  "uri": "https://api.resend.com/emails",
+                  "method": "POST",
+                  "headers": {
+                    "Authorization": "Bearer @{body('Get_Resend_Api_Key')?['value']}",
+                    "Content-Type": "application/json"
+                  },
+                  "body": {
+                    "from": "onboarding@resend.dev",
+                    "html": "<h2>Client Secret Rotated</h2>\r\n\r\n<p>A client secret has been automatically rotated for the following application:</p>\r\n\r\n<table style=\"border-collapse: collapse; width: 100%;\">\r\n  <tr style=\"background-color: #f2f2f2;\">\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>Application</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{items('For_Each_Application')?['displayName']}</td>\r\n  </tr>\r\n  <tr>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>App ID</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{items('For_Each_Application')?['appId']}</td>\r\n  </tr>\r\n  <tr style=\"background-color: #f2f2f2;\">\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>Old Secret</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{coalesce(first(body('Filter_Expiring_Secrets'))?['displayName'],\r\n      'Unnamed')}</td>\r\n  </tr>\r\n  <tr>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>Old Expiry</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{first(body('Filter_Expiring_Secrets'))?['endDateTime']}</td>\r\n  </tr>\r\n  <tr style=\"background-color: #f2f2f2;\">\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>New Secret Name</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">Password created by Logic App @{utcNow('yyyy-MM-dd')}</td>\r\n  </tr>\r\n  <tr>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>New Expiry</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{body('Create_New_Secret')?['endDateTime']}</td>\r\n  </tr>\r\n  <tr style=\"background-color: #f2f2f2;\">\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\"><strong>Key Vault Secret</strong></td>\r\n    <td style=\"padding: 8px; border: 1px solid #ddd;\">@{toLower(replace(items('For_Each_Application')?['displayName'], '\r\n      ', '-'))}-clientsecret</td>\r\n  </tr>\r\n</table>\r\n\r\n<p style=\"margin-top: 20px; color: #666;\">\r\n  The new secret has been stored in Key Vault. Please update any dependent systems to retrieve the secret from Key\r\n  Vault.\r\n</p>\r\n\r\n<p style=\"color: #999; font-size: 12px;\">Rotated at: @{utcNow()}</p>",
+                    "subject": "🔐 Secret Rotated: @{items('For_Each_Application')?['displayName']}",
+                    "to": [
+                      "@{parameters('notificationEmail')}"
+                    ]
+                  }
+                },
+                "runAfter": {
+                  "Append_Rotated_Secret": [
+                    "Succeeded"
+                  ]
+                },
+                "runtimeConfiguration": {
+                  "secureData": {
+                    "properties": [
+                      "inputs"
+                    ]
+                  }
+                }
+              },
+              "Store_In_KeyVault": {
+                "type": "Http",
+                "inputs": {
+                  "uri": "@{parameters('keyVaultUri')}secrets/@{toLower(replace(items('For_Each_Application')?['displayName'], ' ', '-'))}-clientsecret?api-version=7.4",
+                  "method": "PUT",
+                  "headers": {
+                    "Content-Type": "application/json"
+                  },
+                  "body": {
+                    "attributes": {
+                      "enabled": true,
+                      "exp": "@{div(sub(ticks(body('Create_New_Secret')?['endDateTime']), ticks('1970-01-01T00:00:00Z')), 10000000)}"
+                    },
+                    "contentType": "application/x-secret",
+                    "tags": {
+                      "AppId": "@{items('For_Each_Application')?['appId']}",
+                      "AppName": "@{items('For_Each_Application')?['displayName']}",
+                      "ExpiryDate": "@{body('Create_New_Secret')?['endDateTime']}",
+                      "RotatedDate": "@{utcNow()}"
+                    },
+                    "value": "@{body('Create_New_Secret')?['secretText']}"
+                  },
+                  "authentication": {
+                    "audience": "https://vault.azure.net",
+                    "type": "ManagedServiceIdentity"
+                  }
+                },
+                "runAfter": {
+                  "Create_New_Secret": [
+                    "Succeeded"
+                  ]
+                },
+                "runtimeConfiguration": {
+                  "secureData": {
+                    "properties": [
+                      "inputs",
+                      "outputs"
+                    ]
+                  }
+                }
+              }
+            },
+            "else": {
+              "actions": {}
+            },
+            "runAfter": {
+              "Filter_Expiring_Secrets": [
+                "Succeeded"
+              ],
+              "Filter_Valid_Secrets": [
+                "Succeeded"
+              ]
+            }
+          },
+          "Filter_Expiring_Secrets": {
+            "type": "Query",
+            "inputs": {
+              "from": "@item()?['passwordCredentials']",
+              "where": "@and(lessOrEquals(ticks(item()?['endDateTime']), ticks(addDays(utcNow(), parameters('daysBeforeExpiry')))), greater(ticks(item()?['endDateTime']), ticks(utcNow())))"
+            }
+          },
+          "Filter_Valid_Secrets": {
+            "type": "Query",
+            "inputs": {
+              "from": "@items('For_Each_Application')?['passwordCredentials']",
+              "where": "@greater(ticks(item()?['endDateTime']), ticks(addDays(utcNow(), parameters('daysBeforeExpiry'))))"
+            }
+          }
+        },
+        "runAfter": {
+          "Initialize_Expiring_Secrets": [
+            "Succeeded"
+          ]
+        }
+      },
+      "Get_Applications_From_Graph": {
+        "type": "Http",
+        "inputs": {
+          "uri": "https://graph.microsoft.com/v1.0/applications?$top=999&$select=id,displayName,appId,passwordCredentials,keyCredentials",
+          "method": "GET",
+          "authentication": {
+            "audience": "https://graph.microsoft.com",
+            "type": "ManagedServiceIdentity"
+          }
+        },
+        "runAfter": {
+          "Get_Resend_Api_Key": [
+            "Succeeded"
+          ]
+        }
+      },
+      "Get_Resend_Api_Key": {
+        "type": "Http",
+        "inputs": {
+          "uri": "@{parameters('keyVaultUri')}secrets/api-key-resend?api-version=7.4",
+          "method": "GET",
+          "authentication": {
+            "audience": "https://vault.azure.net",
+            "type": "ManagedServiceIdentity"
+          }
+        },
+        "runAfter": {},
+        "runtimeConfiguration": {
+          "secureData": {
+            "properties": [
+              "outputs"
+            ]
+          }
+        }
+      },
+      "Initialize_Expiring_Secrets": {
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "ExpiringSecrets",
+              "type": "Array",
+              "value": []
+            }
+          ]
+        },
+        "runAfter": {
+          "Parse_JSON_Response": [
+            "Succeeded"
+          ]
+        }
+      },
+      "Output_Results": {
+        "type": "Compose",
+        "inputs": {
+          "CheckedAt": "@utcNow()",
+          "DaysThreshold": "@parameters('daysBeforeExpiry')",
+          "Message": "Secret Rotation Complete",
+          "RotatedSecrets": "@variables('ExpiringSecrets')",
+          "RotatedSecretsCount": "@length(variables('ExpiringSecrets'))"
+        },
+        "runAfter": {
+          "For_Each_Application": [
+            "Succeeded"
+          ]
+        }
+      },
+      "Parse_JSON_Response": {
+        "type": "ParseJson",
+        "inputs": {
+          "content": "@body('Get_Applications_From_Graph')",
+          "schema": {
+            "properties": {
+              "value": {
+                "items": {
+                  "properties": {
+                    "appId": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "keyCredentials": {
+                      "type": "array"
+                    },
+                    "passwordCredentials": {
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "runAfter": {
+          "Get_Applications_From_Graph": [
+            "Succeeded"
+          ]
+        }
+      }
+    },
+    "outputs": {},
+    "parameters": {
+      "daysBeforeExpiry": {
+        "defaultValue": 30,
+        "type": "Int"
+      },
+      "keyVaultUri": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "notificationEmail": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "$connections": {
+        "type": "Object",
+        "defaultValue": {}
+      }
+    }
+  }
+}

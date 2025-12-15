@@ -1,0 +1,43 @@
+<h2>Client Secret Rotated</h2>
+
+<p>A client secret has been automatically rotated for the following application:</p>
+
+<table style="border-collapse: collapse; width: 100%;">
+  <tr style="background-color: #f2f2f2;">
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Application</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{items('For_Each_Application')?['displayName']}</td>
+  </tr>
+  <tr>
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>App ID</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{items('For_Each_Application')?['appId']}</td>
+  </tr>
+  <tr style="background-color: #f2f2f2;">
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Old Secret</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{coalesce(first(body('Filter_Expiring_Secrets'))?['displayName'],
+      'Unnamed')}</td>
+  </tr>
+  <tr>
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Old Expiry</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{first(body('Filter_Expiring_Secrets'))?['endDateTime']}</td>
+  </tr>
+  <tr style="background-color: #f2f2f2;">
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>New Secret Name</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">Password created by Logic App @{utcNow('yyyy-MM-dd')}</td>
+  </tr>
+  <tr>
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>New Expiry</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{body('Create_New_Secret')?['endDateTime']}</td>
+  </tr>
+  <tr style="background-color: #f2f2f2;">
+    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Key Vault Secret</strong></td>
+    <td style="padding: 8px; border: 1px solid #ddd;">@{toLower(replace(items('For_Each_Application')?['displayName'], '
+      ', '-'))}-clientsecret</td>
+  </tr>
+</table>
+
+<p style="margin-top: 20px; color: #666;">
+  The new secret has been stored in Key Vault. Please update any dependent systems to retrieve the secret from Key
+  Vault.
+</p>
+
+<p style="color: #999; font-size: 12px;">Rotated at: @{utcNow()}</p>
