@@ -32,3 +32,5 @@ terraform.rc
 
 tfplan
 plan_output.txt
+
+.terraform.lock.hcl
