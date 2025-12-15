@@ -52,6 +52,6 @@ terraform apply
 
 ## Required Permissions
 
-The Logic App's managed identity requires the following permissions:
+TF Service Principal should be able to assigned the following permissions:
 - **Microsoft Graph**: `Application.ReadWrite.All`
 - **Key Vault**: `Key Vault Secrets Officer`
